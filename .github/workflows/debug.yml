@@ -1,7 +1,7 @@
 name: DebugAmazonHTML
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # avvio manuale da Actions
 
 jobs:
   run:
@@ -16,8 +16,11 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install requests
+      - name: Install dependencies
         run: pip install requests beautifulsoup4
+
+      - name: List files (debug)
+        run: ls -R
 
       - name: Run bot in debug mode
         env:
