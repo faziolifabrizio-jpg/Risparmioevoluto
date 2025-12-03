@@ -1,19 +1,19 @@
 import os
-import time
+import re
 import requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 URL = "https://www.amazon.it/gp/goldbox"
 
+DEBUG = os.getenv("DEBUG", "0") == "1"  # se DEBUG=1 stampa HTML nei log
+
 def send_telegram_text(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
     resp = requests.post(url, data=data)
-    print("Telegram response:", resp.status_code, resp.text)
+    print("Telegram text response:", resp.status_code, resp.text)
 
 def send_telegram_photo(photo_url, caption):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
@@ -21,70 +21,61 @@ def send_telegram_photo(photo_url, caption):
     resp = requests.post(url, data=data)
     print("Telegram photo response:", resp.status_code, resp.text)
 
+def fetch_html():
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(URL, headers=headers, timeout=20)
+    print("Amazon status:", r.status_code)
+    if DEBUG:
+        print("=== HTML DEBUG START ===")
+        print(r.text[:5000])  # stampa i primi 5000 caratteri
+        print("=== HTML DEBUG END ===")
+    return r.text if r.status_code == 200 else ""
+
 def extract():
-    # Configura Chrome headless
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    driver = webdriver.Chrome(options=options)
+    html = fetch_html()
+    if not html:
+        return []
 
-    driver.get(URL)
-    time.sleep(5)  # aspetta che la pagina carichi le offerte via JS
-
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    driver.quit()
-
+    soup = BeautifulSoup(html, "html.parser")
     results = []
-    items = soup.select("div.a-section.a-spacing-none.gbh1") or soup.select("div.DealGridItem-module__dealItem_")
-    print("Items trovati:", len(items))
 
-    for item in items[:5]:
-        title = item.select_one("span.a-text-normal")
-        title = title.get_text(strip=True) if title else "N/A"
+    # Prova a trovare card delle offerte
+    deal_items = soup.find_all("div", class_=re.compile(r"^DealGridItem-module__dealItem_"))
+    print("DealGridItem trovati:", len(deal_items))
 
-        img = item.select_one("img.s-image")
-        img = img["src"] if img else None
+    def parse_node(node):
+        title_node = node.select_one("span.a-text-normal") or node.select_one("a.a-link-normal[aria-label]")
+        if title_node and title_node.has_attr("aria-label"):
+            title = title_node.get("aria-label")
+        else:
+            title = title_node.get_text(strip=True) if title_node else "N/A"
 
-        price = item.select_one("span.a-price span.a-offscreen")
-        price = price.get_text(strip=True) if price else "N/A"
+        img_node = node.select_one("img.s-image") or node.select_one("img")
+        img = img_node.get("src") if img_node else None
 
-        old_price = item.select_one("span.a-text-price span.a-offscreen")
-        old_price = old_price.get_text(strip=True) if old_price else "N/A"
+        price_node = node.select_one("span.a-price span.a-offscreen") or node.select_one("span.a-offscreen")
+        price = price_node.get_text(strip=True) if price_node else "N/A"
 
-        reviews = item.select_one("span.a-size-base")
-        reviews = reviews.get_text(strip=True) if reviews else "N/A"
+        old_price_node = node.select_one("span.a-text-price span.a-offscreen")
+        old_price = old_price_node.get_text(strip=True) if old_price_node else "N/A"
 
-        results.append({
-            "title": title,
-            "img": img,
-            "price": price,
-            "old_price": old_price,
-            "reviews": reviews
-        })
+        reviews_node = node.select_one("span.a-size-base") or node.select_one("span.a-size-small")
+        reviews = reviews_node.get_text(strip=True) if reviews_node else "N/A"
 
-    return results
+        return {"title": title, "img": img, "price": price, "old_price": old_price, "reviews": reviews}
+
+    for node in deal_items[:8]:
+        results.append(parse_node(node))
+
+    # Fallback: cerca immagini e prezzi
+    if not results:
+        print("Fallback parsing attivato.")
+        for img in soup.select("img.s-image")[:5]:
+            title = img.get("alt", "N/A")
+            results.append({"title": title, "img": img.get("src"), "price": "N/A", "old_price": "N/A", "reviews": "N/A"})
+
+    print("Totale risultati estratti:", len(results))
+    return results[:5]
 
 def main():
-    products = extract()
-    if not products:
-        send_telegram_text("⚠️ Nessun prodotto trovato su Amazon GoldBox. Il bot è attivo ma la pagina è vuota.")
-        return
-
-    for p in products:
-        if not p["img"]:
-            continue
-        caption = f"""🔥 *OFFERTA AMAZON*
-
-📌 *{p['title']}*
-
-💶 Prezzo: {p['price']}
-❌ Prezzo consigliato: {p['old_price']}
-⭐ Recensioni: {p['reviews']}
-
-🔗 https://www.amazon.it/gp/goldbox
-"""
-        send_telegram_photo(p["img"], caption)
-
-if __name__ == "__main__":
-    main()
+    products
