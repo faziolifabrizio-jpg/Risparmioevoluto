@@ -1,0 +1,35 @@
+name: TestSendChannel
+
+on:
+  workflow_dispatch:   # lo avvii manualmente da Actions
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Send test message to channel
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}   # deve essere -100XXXXXXXXXX
+        run: |
+          python - <<'EOF'
+          import os, requests
+          token = os.getenv("TELEGRAM_TOKEN")
+          chat_id = os.getenv("TELEGRAM_CHAT_ID")
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          data = {"chat_id": chat_id, "text": "✅ Test canale: invio riuscito"}
+          r = requests.post(url, data=data)
+          print("Status:", r.status_code)
+          print("Response:", r.text)
+          EOF
