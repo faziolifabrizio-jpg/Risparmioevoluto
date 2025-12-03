@@ -7,7 +7,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 URL = "https://www.amazon.it/gp/goldbox"
 
-DEBUG = os.getenv("DEBUG", "0") == "1"  # se DEBUG=1 stampa HTML nei log
+DEBUG = os.getenv("DEBUG", "0") == "1"
 
 def send_telegram_text(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -25,10 +25,13 @@ def fetch_html():
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(URL, headers=headers, timeout=20)
     print("Amazon status:", r.status_code)
+
     if DEBUG:
+        print("DEBUG mode attivo:", DEBUG)
         print("=== HTML DEBUG START ===")
-        print(r.text[:5000])  # stampa i primi 5000 caratteri
+        print(r.text[:2000])  # stampiamo i primi 2000 caratteri per non saturare i log
         print("=== HTML DEBUG END ===")
+
     return r.text if r.status_code == 200 else ""
 
 def extract():
@@ -39,7 +42,6 @@ def extract():
     soup = BeautifulSoup(html, "html.parser")
     results = []
 
-    # Prova a trovare card delle offerte
     deal_items = soup.find_all("div", class_=re.compile(r"^DealGridItem-module__dealItem_"))
     print("DealGridItem trovati:", len(deal_items))
 
@@ -59,23 +61,4 @@ def extract():
         old_price_node = node.select_one("span.a-text-price span.a-offscreen")
         old_price = old_price_node.get_text(strip=True) if old_price_node else "N/A"
 
-        reviews_node = node.select_one("span.a-size-base") or node.select_one("span.a-size-small")
-        reviews = reviews_node.get_text(strip=True) if reviews_node else "N/A"
-
-        return {"title": title, "img": img, "price": price, "old_price": old_price, "reviews": reviews}
-
-    for node in deal_items[:8]:
-        results.append(parse_node(node))
-
-    # Fallback: cerca immagini e prezzi
-    if not results:
-        print("Fallback parsing attivato.")
-        for img in soup.select("img.s-image")[:5]:
-            title = img.get("alt", "N/A")
-            results.append({"title": title, "img": img.get("src"), "price": "N/A", "old_price": "N/A", "reviews": "N/A"})
-
-    print("Totale risultati estratti:", len(results))
-    return results[:5]
-
-def main():
-    products
+        reviews_node = node.select
