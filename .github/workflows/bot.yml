@@ -1,9 +1,9 @@
 name: AmazonBot
 
 on:
-  workflow_dispatch:   # lo avvii manualmente da Actions
+  workflow_dispatch:   # avvio manuale
   schedule:
-    - cron: "0 8 * * *"   # esempio: ogni giorno alle 08:00 UTC
+    - cron: "0 8 * * *"   # ogni giorno alle 08:00 UTC
 
 jobs:
   run:
@@ -19,24 +19,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4 selenium
-
-      - name: Install Chrome
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget unzip
-          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
-
-      - name: Install ChromeDriver
-        run: |
-          CHROME_VERSION=$(google-chrome --version | awk '{print $3}')
-          MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d. -f1)
-          DRIVER_VERSION=$(wget -qO- "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${MAJOR_VERSION}")
-          wget https://chromedriver.storage.googleapis.com/${DRIVER_VERSION}/chromedriver_linux64.zip
-          unzip chromedriver_linux64.zip
-          sudo mv chromedriver /usr/local/bin/
+        run: pip install requests beautifulsoup4
 
       - name: Run bot
         env:
