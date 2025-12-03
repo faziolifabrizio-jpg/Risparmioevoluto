@@ -1,4 +1,3 @@
-
 import requests
 from bs4 import BeautifulSoup
 import os
@@ -10,15 +9,23 @@ URL = "https://www.amazon.it/gp/goldbox"
 
 def send_telegram(photo_url, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    data = {"chat_id": TELEGRAM_CHAT_ID, "caption": text, "photo": photo_url}
-    requests.post(url, data=data)
+    data = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "caption": text,
+        "photo": photo_url,
+        "parse_mode": "Markdown"  # abilita grassetto, emoji ecc.
+    }
+    resp = requests.post(url, data=data)
+    print("Telegram response:", resp.status_code, resp.text)
 
 def extract():
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(URL, headers=headers)
+    print("Amazon status:", r.status_code)
     soup = BeautifulSoup(r.text, "html.parser")
 
     items = soup.select("div.GBHb")
+    print(f"Trovati {len(items)} items")
     results = []
     for item in items[:5]:
         title = item.select_one("h2")
@@ -51,7 +58,12 @@ def extract():
 
 def main():
     products = extract()
+    if not products:
+        print("Nessun prodotto trovato.")
     for p in products:
+        if not p["img"]:
+            print(f"Prodotto senza immagine: {p['title']}")
+            continue
         text = f"""🔥 *OFFERTA AMAZON*
 
 📌 *{p['title']}*
