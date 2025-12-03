@@ -24,14 +24,6 @@ jobs:
             pip install requests beautifulsoup4
           fi
 
-      - name: List files (debug)
-        run: ls -lah
-
-      - name: Print Python and pip versions
-        run: |
-          python --version
-          pip --version
-
       - name: Run bot in debug mode
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
