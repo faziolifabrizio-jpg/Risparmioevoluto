@@ -2,13 +2,11 @@ name: AmazonBot
 
 on:
   schedule:
-    # Primo invio oggi alle 23:00 CET (22:00 UTC)
-    - cron: "0 22 3 12 *"   # 3 dicembre alle 22:00 UTC
     # Da domani ogni giorno alle 09:00 CET (08:00 UTC)
     - cron: "0 8 * * *"
     # Da domani ogni giorno alle 21:00 CET (20:00 UTC)
     - cron: "0 20 * * *"
-  workflow_dispatch:
+  workflow_dispatch:   # 👈 abilita il pulsante "Run workflow" manuale
 
 jobs:
   run:
