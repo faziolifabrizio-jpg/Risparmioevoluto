@@ -132,10 +132,13 @@ def main():
         return
 
     for p in products:
-        if not p.get("img"):
-            continue
-        caption = (
-            "🔥 *OFFERTA AMAZON*\n\n"
-            f"📌 *{p.get('title','N/A')}*\n\n"
-            f"💶 Prezzo: {p.get('price','N/A')}\n"
-            f"❌ Prezzo consigliato: {p.get('old_price','N
+    if not p.get("img"):
+        continue
+    caption = (
+        "🔥 *OFFERTA AMAZON*\n\n"
+        f"📌 *{p.get('title','N/A')}*\n\n"
+        f"💶 Prezzo: {p.get('price','N/A')}\n"
+        f"❌ Prezzo consigliato: {p.get('old_price','N/A')}\n"
+        f"⭐ Recensioni: {p.get('reviews','N/A')}\n"
+    )
+    send_telegram_photo(p["img"], caption)
