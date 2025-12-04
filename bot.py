@@ -4,6 +4,18 @@ import random
 import requests
 from bs4 import BeautifulSoup
 
+# Porta finta per Render
+from http.server import SimpleHTTPRequestHandler
+import socketserver
+import threading
+
+def fake_webserver():
+    PORT = int(os.getenv("PORT", 10000))
+    httpd = socketserver.TCPServer(("", PORT), SimpleHTTPRequestHandler)
+    httpd.serve_forever()
+
+threading.Thread(target=fake_webserver, daemon=True).start()
+
 # ================================
 # CONFIGURAZIONE
 # ================================
