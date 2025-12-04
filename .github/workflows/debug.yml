@@ -1,4 +1,3 @@
-# .github/workflows/debug.yml
 name: DebugAmazonHTML
 
 on:
@@ -7,6 +6,9 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write   # necessario per upload-artifact v4
 
     steps:
       - name: Checkout repository
