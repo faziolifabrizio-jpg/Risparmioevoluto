@@ -6,8 +6,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 DEBUG = os.getenv("DEBUG", "0") == "1"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
     "Referer": "https://www.amazon.it/",
@@ -92,7 +91,8 @@ def parse_cards(html: str) -> list:
         if img_node:
             for attr in ["src", "data-src", "data-image-src"]:
                 if img_node.has_attr(attr) and img_node.get(attr):
-                    img = img_node.get(attr); break
+                    img = img_node.get(attr)
+                    break
 
         price_node = card.select_one("span.a-price span.a-offscreen") or card.select_one("span.a-offscreen")
         price = price_node.get_text(strip=True) if price_node else "N/A"
@@ -132,13 +132,10 @@ def main():
         return
 
     for p in products:
-    if not p.get("img"):
-        continue
-    caption = (
-        "🔥 *OFFERTA AMAZON*\n\n"
-        f"📌 *{p.get('title','N/A')}*\n\n"
-        f"💶 Prezzo: {p.get('price','N/A')}\n"
-        f"❌ Prezzo consigliato: {p.get('old_price','N/A')}\n"
-        f"⭐ Recensioni: {p.get('reviews','N/A')}\n"
-    )
-    send_telegram_photo(p["img"], caption)
+        if not p.get("img"):
+            continue
+        caption = (
+            "🔥 *OFFERTA AMAZON*\n\n"
+            f"📌 *{p.get('title','N/A')}*\n\n"
+            f"💶 Prezzo: {p.get('price','N/A')}\n"
+            f"❌ Prezzo consigliato: {p
