@@ -9,7 +9,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 AFFILIATE_TAG = os.getenv("AFFILIATE_TAG", "risparmioevol-21")
 
-GOLDBOX_URL = "https://www.amazon.it/gp/goldbox"
+GOLDBOX_URL = "https://www.amazon.it/deals"
 
 # ---- TELEGRAM ----
 def tg(text):
