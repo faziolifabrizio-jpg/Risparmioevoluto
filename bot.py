@@ -2,24 +2,28 @@ import os
 import time
 import json
 import re
-import ast
 from typing import List, Dict, Any, Optional
 
 import requests
 
-# ================== CONFIG ==================
+# ============ CONFIG ============
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 AFFILIATE_TAG = "risparmioevol-21"
 
-GOLDBOX_URL = "https://www.amazon.it/gp/goldbox"
-MARKETPLACE_ID = "APJ6JRA9NG5V4"  # Amazon.it :contentReference[oaicite:0]{index=0}
+PAGES = [
+    "https://www.amazon.it/deals",
+    "https://www.amazon.it/gp/deals",
+    "https://www.amazon.it/gp/goldbox",
+    "https://www.amazon.it/s?k=offerte",
+    "https://www.amazon.it/s?k=offerte+oggi",
+    "https://www.amazon.it/s?k=sconto",
+]
 
-MAX_DEALS_FETCH = 100       # quanti deal chiediamo all’API
-MAX_OFFERS_SEND = 10        # quante offerte mandare a ogni esecuzione
+MAX_OFFERS_SEND = 10          # quante offerte mandare ad ogni esecuzione
 HISTORY_FILE = "published.json"
-HISTORY_HOURS = 24          # non ripubblicare la stessa offerta nelle ultime 24h
+HISTORY_HOURS = 24            # non ripubblicare offerte con stesso ASIN nelle ultime 24h
 
 DEBUG = os.getenv("DEBUG", "0") == "1"
 
@@ -34,12 +38,12 @@ HEADERS = {
     "Connection": "keep-alive",
 }
 
-# ================== TELEGRAM ==================
 
+# ============ TELEGRAM ============
 
 def tg_text(msg: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[TG] Variabili TELEGRAM_TOKEN / TELEGRAM_CHAT_ID mancanti")
+        print("[TG] TELEGRAM_TOKEN / TELEGRAM_CHAT_ID mancanti, salto invio testo")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     data = {
@@ -57,7 +61,7 @@ def tg_text(msg: str) -> None:
 
 def tg_photo(photo_url: str, caption: str) -> None:
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[TG] Variabili TELEGRAM_TOKEN / TELEGRAM_CHAT_ID mancanti (photo)")
+        print("[TG] TELEGRAM_TOKEN / TELEGRAM_CHAT_ID mancanti, salto invio foto")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     data = {
@@ -73,8 +77,7 @@ def tg_photo(photo_url: str, caption: str) -> None:
         print("[TG photo ERRORE]", e)
 
 
-# ================== UTILITY ==================
-
+# ============ UTILITY ============
 
 def parse_price(price: Optional[str]) -> Optional[float]:
     if not price:
@@ -121,187 +124,141 @@ def filter_recent(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [h for h in history if h.get("ts", 0) >= cutoff]
 
 
-# ================== GOLD BOX API ==================
+# ============ ESTRAZIONE JSON INCORPORATO ============
 
-
-def extract_sorted_deal_ids(html: str) -> List[str]:
+def extract_deal_json_from_html(html: str) -> List[Dict[str, Any]]:
     """
-    Legge dal sorgente HTML la lista "sortedDealIDs"
-    che Amazon usa per costruire la pagina Goldbox.
+    Cerca un blocco JSON grosso che contiene "dealDetails".
+    È best-effort: Amazon cambia spesso, quindi usiamo regex + bilanciamento parentesi.
+    Se trova qualcosa tipo {"dealDetails":{...}} lo parsa e restituisce la lista dei deal.
     """
-    # pattern simile al gist amazon_xmas.py :contentReference[oaicite:1]{index=1}
-    m = re.search(r'"sortedDealIDs"\s*:\s*(\[[^\]]+\])', html)
-    if not m:
-        print("[GOLDBOX] sortedDealIDs non trovati")
-        return []
+    deals: List[Dict[str, Any]] = []
 
-    text_list = m.group(1)
+    idx = html.find('{"dealDetails":')
+    if idx == -1:
+        # tentativo alternativo: "dealDetails":{""
+        idx = html.find('"dealDetails":{')
+        if idx == -1:
+            print("[JSON] 'dealDetails' non trovato in pagina")
+            return deals
+
+        # risaliamo fino alla '{' più vicina prima di "dealDetails"
+        start = html.rfind("{", 0, idx)
+    else:
+        start = idx
+
+    if start == -1:
+        print("[JSON] Nessuna '{' iniziale trovata")
+        return deals
+
+    depth = 0
+    in_str = False
+    prev = ""
+    end = None
+
+    for i in range(start, len(html)):
+        ch = html[i]
+        if ch == '"' and prev != '\\':
+            in_str = not in_str
+        if not in_str:
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        prev = ch
+
+    if end is None:
+        print("[JSON] Bilanciamento parentesi fallito")
+        return deals
+
+    chunk = html[start:end]
+
     try:
-        # può essere JSON puro o pseudo-lista Python
-        deal_ids = ast.literal_eval(text_list)
-        if isinstance(deal_ids, list):
-            return [str(x) for x in deal_ids]
-    except Exception:
-        pass
+        obj = json.loads(chunk)
+    except Exception as e:
+        print("[JSON] Errore json.loads:", e)
+        if DEBUG:
+            print("=== CHUNK JSON FALLITO ===")
+            print(chunk[:1000])
+        return deals
 
-    try:
-        deal_ids = json.loads(text_list)
-        if isinstance(deal_ids, list):
-            return [str(x) for x in deal_ids]
-    except Exception:
-        pass
+    deal_details = obj.get("dealDetails")
+    if isinstance(deal_details, dict):
+        deals = list(deal_details.values())
+    elif isinstance(deal_details, list):
+        deals = deal_details
+    else:
+        print("[JSON] 'dealDetails' con formato inatteso")
+        deals = []
 
-    print("[GOLDBOX] impossibile parsare sortedDealIDs")
-    return []
+    if DEBUG and deals:
+        print("[JSON] Esempio di deal trovato:")
+        print(json.dumps(deals[0], indent=2, ensure_ascii=False))
 
-
-def get_session_id_from_cookies(cookies: Dict[str, str]) -> str:
-    """
-    L’API GetDeals vuole un sessionID. In genere è il cookie "session-id".
-    Se non c'è, prendiamo il primo valore giusto per non far fallire la chiamata.
-    """
-    if "session-id" in cookies:
-        return cookies["session-id"]
-    if cookies:
-        # primo cookie qualsiasi, come nel gist originale
-        return list(cookies.values())[0]
-    return ""
+    print(f"[JSON] Deal estratti da pagina: {len(deals)}")
+    return deals
 
 
-def call_get_deals(session: requests.Session, deal_ids: List[str]) -> List[Dict[str, Any]]:
-    """
-    Effettua le POST verso /xa/dealcontent/v2/GetDeals spezzando
-    la lista di dealIDs in blocchi (es. 20 alla volta) e raccoglie
-    tutti i "dealDetails".
-    """
-    results: List[Dict[str, Any]] = []
-    cookies = session.cookies.get_dict()
-    session_id = get_session_id_from_cookies(cookies)
-
-    if not session_id:
-        print("[GETDEALS] Nessun sessionID trovato nei cookie")
-        return []
-
-    # spezza in blocchi da 20
-    chunk_size = 20
-    for i in range(0, min(len(deal_ids), MAX_DEALS_FETCH), chunk_size):
-        chunk = deal_ids[i : i + chunk_size]
-
-        deal_targets = [{"dealID": d} for d in chunk]
-
-        payload = {
-            "requestMetadata": {
-                "marketplaceID": MARKETPLACE_ID,
-                "clientID": "goldbox_mobile_pc",
-                "sessionID": session_id,
-            },
-            "dealTargets": deal_targets,
-            "responseSize": "ALL",
-            "itemResponseSize": "DEFAULT_WITH_PREEMPTIVE_LEAKING",
-        }
-
-        nocache = str(int(time.time() * 1000))
-        url = f"https://www.amazon.it/xa/dealcontent/v2/GetDeals?nocache={nocache}"
-
-        try:
-            r = session.post(
-                url,
-                json=payload,
-                headers={"Accept": "application/json, text/javascript, */*; q=0.01"},
-                timeout=20,
-            )
-            print("[GETDEALS] status", r.status_code, "per blocco", i // chunk_size + 1)
-            if r.status_code != 200:
-                continue
-
-            data = r.json()
-            deal_details = data.get("dealDetails", {})
-            for d in deal_details.values():
-                results.append(d)
-
-            time.sleep(0.5)  # piccola pausa per non insospettire Amazon
-
-        except Exception as e:
-            print("[GETDEALS] Errore POST:", e)
-
-    # debug: mostra un esempio completo di JSON di una singola offerta
-    if DEBUG and results:
-        print("========== ESEMPIO DEAL RAW ==========")
-        print(json.dumps(results[0], indent=2, ensure_ascii=False))
-        print("======================================")
-
-    print(f"[GETDEALS] Deal totali raccolti: {len(results)}")
-    return results
-
-
-def fetch_goldbox_deals() -> List[Dict[str, Any]]:
-    """
-    - Apre la Goldbox con requests
-    - Estrae sortedDealIDs
-    - Chiama l’API GetDeals
-    - Restituisce la lista di deal raw (JSON)
-    """
+def fetch_all_deals_from_pages() -> List[Dict[str, Any]]:
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    print("[GOLDBOX] GET pagina Goldbox…")
-    try:
-        r = session.get(GOLDBOX_URL, timeout=25)
-    except Exception as e:
-        print("[GOLDBOX] Errore HTTP:", e)
-        return []
+    all_deals: List[Dict[str, Any]] = []
 
-    print("[GOLDBOX] status", r.status_code)
-    if r.status_code != 200:
-        return []
+    for url in PAGES:
+        print(f"[FETCH] GET {url}")
+        try:
+            r = session.get(url, timeout=25)
+        except Exception as e:
+            print("[FETCH] Errore HTTP:", e)
+            continue
 
-    deal_ids = extract_sorted_deal_ids(r.text)
-    if not deal_ids:
-        return []
+        print("[FETCH] status", r.status_code)
+        if r.status_code != 200:
+            continue
 
-    print(f"[GOLDBOX] sortedDealIDs trovati: {len(deal_ids)}")
-    return call_get_deals(session, deal_ids)
+        deals = extract_deal_json_from_html(r.text)
+        all_deals.extend(deals)
+        time.sleep(1.0)
+
+    print(f"[FETCH] Totale deal grezzi raccolti da tutte le pagine: {len(all_deals)}")
+    return all_deals
 
 
-# ================== MAPPATURA DEAL → PRODOTTO ==================
-
+# ============ MAPPATURA DEAL → PRODOTTO ============
 
 def map_deal_to_product(deal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Qui traduciamo la struttura JSON di Amazon (dealDetails)
-    in un dizionario semplice con:
-      - asin
-      - title
-      - price_now_str
-      - list_price_str
-      - discount_pct
-      - rating
-      - review_count
-      - image
-      - url_affiliato
-
-    ATTENZIONE:
-    Amazon può cambiare le chiavi. Ho messo delle ipotesi comuni,
-    e in DEBUG il bot ti stampa il JSON raw per poterle affinare.
+    Traduciamo il JSON di Amazon in un dizionario semplice:
+    - asin
+    - title
+    - price_now_str
+    - list_price_str
+    - discount_pct
+    - rating_num / rating_stars
+    - review_count
+    - image
+    - url affiliato
     """
-    # candidate chiavi possibili per titolo
+
+    # Titolo
     title = (
         deal.get("title")
         or deal.get("dealTitle")
         or deal.get("headline")
-        or deal.get("primaryItem", {}).get("title")
     )
 
-    # ASIN (potrebbe stare sotto vari campi, dipende dalla struttura)
+    # ASIN
     asin = (
         deal.get("asin")
         or deal.get("entityId")
         or deal.get("primaryItem", {}).get("asin")
     )
 
-    # rating medio (spesso in 0-5)
-    rating = None
-    # esempi di percorsi possibili (lasciati “best effort”):
+    # Rating (numero)
     rating = (
         deal.get("averageRating")
         or deal.get("rating")
@@ -309,7 +266,6 @@ def map_deal_to_product(deal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     )
 
     if isinstance(rating, dict):
-        # alcuni JSON mettono {"value":4.6, ...}
         rating = rating.get("value")
 
     rating_num = None
@@ -319,24 +275,26 @@ def map_deal_to_product(deal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except Exception:
         rating_num = None
 
-    # numero recensioni (stesso discorso, chiavi ipotetiche)
+    # Numero recensioni
     review_count = (
         deal.get("totalReviews")
         or deal.get("reviewCount")
         or deal.get("primaryItem", {}).get("totalReviews")
     )
 
-    # immagine
+    # Immagine
     image = (
         deal.get("primaryItem", {}).get("imageUrl")
         or deal.get("imageUrl")
     )
 
-    # prezzi: ipotesi di chiavi comuni
-    # (da affinare dopo aver visto il JSON reale in DEBUG)
+    # Prezzi
+    # Qui tentiamo diverse chiavi comuni che Amazon usa
     price_now_str = (
         deal.get("dealPrice", {}).get("formattedPrice")
         or deal.get("price", {}).get("formattedPrice")
+        or deal.get("minDealPrice", {}).get("formattedPrice")
+        or deal.get("maxDealPrice", {}).get("formattedPrice")
         or deal.get("displayPrice")
     )
 
@@ -350,13 +308,12 @@ def map_deal_to_product(deal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     p_list = parse_price(list_price_str)
 
     if not p_now or not p_list or p_now >= p_list:
-        # niente sconto reale → scartiamo
+        # niente sconto vero
         return None
 
     discount_pct = round((p_list - p_now) / p_list * 100)
 
     if not asin:
-        # senza ASIN non possiamo fare link affiliato
         return None
 
     url_aff = f"https://www.amazon.it/dp/{asin}/?tag={AFFILIATE_TAG}"
@@ -377,19 +334,17 @@ def map_deal_to_product(deal: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return prod
 
 
-# ================== MAIN LOGIC ==================
+# ============ MAIN ============
 
+def main() -> None:
+    print("[MAIN] Avvio bot Amazon deals (HTML+JSON)…")
+    tg_text("🔍 <b>Analizzo le offerte Amazon…</b>")
 
-def main():
-    print("[MAIN] Avvio bot Goldbox JSON…")
-    tg_text("🔍 <b>Analizzo le offerte Amazon (Goldbox API)…</b>")
-
-    raw_deals = fetch_goldbox_deals()
+    raw_deals = fetch_all_deals_from_pages()
     if not raw_deals:
-        tg_text("❌ <b>Nessun deal ricevuto da Amazon (Goldbox API).</b>")
+        tg_text("❌ <b>Nessun deal trovato nelle pagine offerte.</b>")
         return
 
-    # mappiamo e filtriamo solo quelli con sconto valido
     products: List[Dict[str, Any]] = []
     for d in raw_deals:
         prod = map_deal_to_product(d)
@@ -397,16 +352,16 @@ def main():
             products.append(prod)
 
     if DEBUG:
-        print(f"[MAIN] prodotti mappati (scontati): {len(products)}")
+        print(f"[MAIN] Prodotti scontati mappati: {len(products)}")
 
     if not products:
-        tg_text("❌ <b>Nessun prodotto scontato trovato dalla Goldbox API.</b>")
+        tg_text("❌ <b>Nessun prodotto con sconto reale trovato.</b>")
         return
 
     # ordina per sconto decrescente
     products.sort(key=lambda x: x["discount_pct"], reverse=True)
 
-    # gestisci storico
+    # history (no duplicati 24h)
     history = filter_recent(load_history())
     seen = {h["asin"] for h in history}
     now = time.time()
@@ -428,28 +383,27 @@ def main():
 
     # invio su Telegram
     for p in to_send:
-        caption_lines = [
-            f"🔥 <b>{p['title']}</b>",
-        ]
+        lines = [f"🔥 <b>{p['title']}</b>"]
+
         if p.get("rating_stars"):
-            caption_lines.append(f"⭐ {p['rating_stars']}")
+            lines.append(f"⭐ {p['rating_stars']}")
         if p.get("review_count"):
-            caption_lines.append(f"💬 {p['review_count']} recensioni")
+            lines.append(f"💬 {p['review_count']} recensioni")
 
-        caption_lines.append(f"💶 Prezzo: <b>{p['price_now_str']}</b>")
-        caption_lines.append(f"❌ Prezzo consigliato: <s>{p['list_price_str']}</s>")
-        caption_lines.append(f"🎯 Sconto: <b>-{p['discount_pct']}%</b>")
-        caption_lines.append("")
-        caption_lines.append(f"🔗 <a href='{p['url']}'>Apri l'offerta</a>")
+        lines.append(f"💶 Prezzo: <b>{p['price_now_str']}</b>")
+        lines.append(f"❌ Prezzo consigliato: <s>{p['list_price_str']}</s>")
+        lines.append(f"🎯 Sconto: <b>-{p['discount_pct']}%</b>")
+        lines.append("")
+        lines.append(f"🔗 <a href='{p['url']}'>Apri l'offerta</a>")
 
-        caption = "\n".join(caption_lines)
+        caption = "\n".join(lines)
 
         if p.get("image"):
             tg_photo(p["image"], caption)
         else:
             tg_text(caption)
 
-    tg_text(f"✅ <b>Pubblicate {len(to_send)} offerte via Goldbox API.</b>")
+    tg_text(f"✅ <b>Pubblicate {len(to_send)} offerte con lo sconto più alto.</b>")
 
 
 if __name__ == "__main__":
